@@ -24,26 +24,24 @@ class generator_from_callback(collections.abc.Generator):
 
         def callback(value):
             done_queue.put((False, value))
-            cmd, *args = ready_queue.get()
+            cmd, val = ready_queue.get()
             if cmd == 'send':
-                return args[0]
+                return val
             elif cmd == 'throw':
-                raise args[0]
+                raise val
             else:
                 assert False
 
         def thread_func():
             while True:
-                cmd, *args = ready_queue.get()
-                if cmd == 'send':
-                    if args[0] is not None:
-                        print('oops')
-                        done_queue.put((True, TypeError("can't send non-None value to a just-started generator")))
-                        continue
+                cmd, val = ready_queue.get()
+                if cmd == 'send' and val is not None:
+                    done_queue.put((True, TypeError("can't send non-None value to a just-started generator")))
+                    continue
                 break
             try:
                 if cmd == 'throw':
-                    raise args[0]
+                    raise val
                 ret = func(callback)
                 raise StopIteration(ret) if ret is not None else StopIteration
             except BaseException as e:
