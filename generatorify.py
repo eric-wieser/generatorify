@@ -30,7 +30,7 @@ class generator_from_callback(collections.abc.Generator):
             elif cmd == 'throw':
                 raise val
             else:
-                assert False
+                assert False  # pragma: no cover
 
         def thread_func():
             while True:
