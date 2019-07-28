@@ -36,6 +36,14 @@ class Value(namedtuple('Value', 'v')):
             return NotImplemented
         return self._key() != other._key()
 
+# verify the helpers work
+assert Value(1) == Value(1)
+assert Value(1) != Value(2)
+assert Error(ValueError()) == Error(ValueError())
+assert Error(ValueError()) != Error(TypeError())
+assert Value(1) != Error(1)
+assert not (Value(1) == Error(1))
+
 
 def result_of(f, *args, **kwargs):
     try:
@@ -131,6 +139,26 @@ class TestReturn(ComparisonTest):
         assert g_m.method_calls == c_m.method_calls
 
 
+class TestReturnImmediately(ComparisonTest):
+    """ Test that return behaves just like a generator """
+    @staticmethod
+    def generator(m):
+        m.one()
+        return 2
+        yield  # pragma: no cover
+
+    @staticmethod
+    def callback(m, yield_):
+        m.one()
+        return 2
+
+    def test(self, c, g, c_m, g_m):
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration(2,))
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
+        assert g_m.method_calls == c_m.method_calls
+
+
 class TestRaise(ComparisonTest):
     """ Test that raise behaves just like a generator """
     @staticmethod
@@ -156,7 +184,7 @@ class TestRaise(ComparisonTest):
         assert g_m.method_calls == c_m.method_calls
 
 
-class TestSend(ComparisonTest):
+class TestReceive(ComparisonTest):
     """ Test that send behaves just like a generator """
     @staticmethod
     def generator(m):
@@ -174,7 +202,7 @@ class TestSend(ComparisonTest):
         ret2 = yield_(2)
         m.three(ret2)
 
-    def test(self, c, g, c_m, g_m):
+    def test_send(self, c, g, c_m, g_m):
         # first send call must be non-none
         assert result_of(g.send, "not none") == result_of(c.send, "not none") == Error(TypeError(mock.ANY))
         assert g_m.method_calls == c_m.method_calls == []
@@ -186,8 +214,36 @@ class TestSend(ComparisonTest):
         assert result_of(g.send, 'b') == result_of(c.send, 'b') == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
 
+    def test_throw_before_first(self, c, g, c_m, g_m):
+        assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(ValueError())
+        assert g_m.method_calls == c_m.method_calls == []
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
+        assert g_m.method_calls == c_m.method_calls == []
 
-class TestCatch(ComparisonTest):
+    def test_close_before_first(self, c, g, c_m, g_m):
+        assert result_of(g.close) == result_of(c.close) == Value(None)
+        assert g_m.method_calls == c_m.method_calls == []
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
+        assert g_m.method_calls == c_m.method_calls == []
+
+    def test_throw(self, c, g, c_m, g_m):
+        assert result_of(next, g) == result_of(next, c) == Value(1)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(ValueError())
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
+        assert g_m.method_calls == c_m.method_calls
+
+    def test_close(self, c, g, c_m, g_m):
+        assert result_of(next, g) == result_of(next, c) == Value(1)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(g.close) == result_of(c.close) == Value(None)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
+        assert g_m.method_calls == c_m.method_calls
+
+
+class TestCatchAndContinue(ComparisonTest):
     """ Test that catch behaves just like a generator """
     @staticmethod
     def generator(m):
@@ -196,21 +252,10 @@ class TestCatch(ComparisonTest):
             yield 1
         except BaseException as e:
             m.two(Error(e))  # Error(e) makes equality work in the test
-        else:
-            m.two()
 
         # not caught
         yield 2
         m.three()
-
-        # caught and changed
-        try:
-            yield 3
-        except BaseException as e:
-            m.four(Error(e))  # Error(e) makes equality work in the test
-            raise OSError()
-        else:
-            m.four()
 
     @staticmethod
     def callback(m, yield_):
@@ -220,91 +265,100 @@ class TestCatch(ComparisonTest):
             yield_(1)
         except BaseException as e:
             m.two(Error(e))  # Error(e) makes equality work in the test
-        else:
-            m.two()
 
-        # not caught
         yield_(2)
         m.three()
 
-        # caught and changed
-        try:
-            yield_(3)
-        except BaseException as e:
-            m.four(Error(e))  # Error(e) makes equality work in the test
-            raise OSError()
-        else:
-            m.four()
-
-    def test_throw_before_first(self, c, g, c_m, g_m):
-        assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(ValueError())
-        assert g_m.method_calls == c_m.method_calls == []
-        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
-        assert g_m.method_calls == c_m.method_calls == []
-
-    def test_throw_within_try_except(self, c, g, c_m, g_m):
+    def test_throw(self, c, g, c_m, g_m):
         assert result_of(next, g) == result_of(next, c) == Value(1)
         assert g_m.method_calls == c_m.method_calls
         assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Value(2)
         assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Value(3)
-        assert g_m.method_calls == c_m.method_calls
         assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
 
-    def test_throw_outside_try_except(self, c, g, c_m, g_m):
-        assert result_of(next, g) == result_of(next, c) == Value(1)
-        assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Value(2)
-        assert g_m.method_calls == c_m.method_calls
-        assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(ValueError())
-        assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
-        assert g_m.method_calls == c_m.method_calls
-
-    def test_throw_exception_changes(self, c, g, c_m, g_m):
-        assert result_of(next, g) == result_of(next, c) == Value(1)
-        assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Value(2)
-        assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Value(3)
-        assert g_m.method_calls == c_m.method_calls
-        assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(OSError())
-        assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
-        assert g_m.method_calls == c_m.method_calls
-
-    def test_close_within_try_except(self,  c, g, c_m, g_m):
+    def test_close(self,  c, g, c_m, g_m):
         assert result_of(next, g) == result_of(next, c) == Value(1)
         assert g_m.method_calls == c_m.method_calls
         # different messages, wildcard goes in the middle
         assert result_of(g.close) == Error(RuntimeError(mock.ANY)) == result_of(c.close)
         assert g_m.method_calls == c_m.method_calls
 
-        assert result_of(next, g) == result_of(next, c) == Value(3)
-        assert g_m.method_calls == c_m.method_calls
-
         assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
 
-    def test_close_outside_try_except(self, c, g, c_m, g_m):
+
+class TestCatchAndRaise(ComparisonTest):
+    """ Test that catch behaves just like a generator """
+    @staticmethod
+    def generator(m):
+        m.one()
+        try:
+            yield 1
+        except BaseException as e:
+            m.two(Error(e))  # Error(e) makes equality work in the test
+            raise OSError()
+
+    @staticmethod
+    def callback(m, yield_):
+        m.one()
+        # caught and continued
+        try:
+            yield_(1)
+        except BaseException as e:
+            m.two(Error(e))  # Error(e) makes equality work in the test
+            raise OSError()
+
+    def test_throw(self, c, g, c_m, g_m):
         assert result_of(next, g) == result_of(next, c) == Value(1)
         assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Value(2)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(OSError())
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
+        assert g_m.method_calls == c_m.method_calls
+
+    def test_close(self, c, g, c_m, g_m):
+        assert result_of(next, g) == result_of(next, c) == Value(1)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(g.close) == result_of(c.close) == Error(OSError())
         assert g_m.method_calls == c_m.method_calls
         assert result_of(g.close) == result_of(c.close) == Value(None)
         assert g_m.method_calls == c_m.method_calls
         assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
 
-    def test_throw_exception_changes(self, c, g, c_m, g_m):
+
+class TestCatchAndReturn(ComparisonTest):
+    @staticmethod
+    def generator(m):
+        m.one()
+        try:
+            yield 1
+        except BaseException as e:
+            m.two(Error(e))  # Error(e) makes equality work in the test
+            return 3
+
+    @staticmethod
+    def callback(m, yield_):
+        m.one()
+        # caught and continued
+        try:
+            yield_(1)
+        except BaseException as e:
+            m.two(Error(e))  # Error(e) makes equality work in the test
+            return 3
+
+    def test_throw(self, c, g, c_m, g_m):
         assert result_of(next, g) == result_of(next, c) == Value(1)
         assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Value(2)
+        assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(StopIteration(3,))
         assert g_m.method_calls == c_m.method_calls
-        assert result_of(next, g) == result_of(next, c) == Value(3)
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
-        assert result_of(g.close) == result_of(c.close) == Error(OSError())
+
+    def test_close(self, c, g, c_m, g_m):
+        assert result_of(next, g) == result_of(next, c) == Value(1)
         assert g_m.method_calls == c_m.method_calls
         assert result_of(g.close) == result_of(c.close) == Value(None)
         assert g_m.method_calls == c_m.method_calls
@@ -315,8 +369,8 @@ class TestCatch(ComparisonTest):
 def test_no_circular_references():
     def invoke_with_values(f):
         f(1)
-        f(2)
-        f(3)
+        f(2)  # pragma: no cover
+        f(3)  # pragma: no cover
     values_iter = generatorify.generator_from_callback(
         lambda yield_: invoke_with_values(yield_)
     )
@@ -329,4 +383,4 @@ def test_no_circular_references():
 
 
 if __name__ == '__main__':
-    pytest.main([__file__, '-vv'])
+    pytest.main([__file__, '-vv', '-s'])  # pragma: no cover
