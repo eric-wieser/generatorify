@@ -1,4 +1,8 @@
 # generatorify
+
+[![Build Status](https://travis-ci.org/eric-wieser/generatorify.svg?branch=master)](https://travis-ci.org/eric-wieser/generatorify)
+[![codecov](https://codecov.io/gh/eric-wieser/generatorify/branch/master/graph/badge.svg)](https://codecov.io/gh/eric-wieser/generatorify)
+
 Convert a function taking a repeated callback to a generator that pauses at each callback
 
 If a third party provides a function like:
