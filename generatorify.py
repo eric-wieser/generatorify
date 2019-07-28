@@ -56,7 +56,11 @@ class generator_from_callback(collections.abc.Generator):
         self._ready_queue.put(args)
         is_exception, val = self._done_queue.get()
         if is_exception:
-            raise val
+            try:
+                raise val
+            finally:
+                # prevent val's traceback containing a reference cycle
+                del val
         else:
             return val
 
@@ -98,21 +102,24 @@ class callback_from_generator(collections.abc.Callable):
     def __call__(self, callback):
         g = self._generator_func()
         try:
-            from_g = next(g)
-        except StopIteration as si:
-            return si.value
-        # other exceptions propagate
-
-        while True:
             try:
-                v_from_c = callback(from_g)
-            except BaseException as e_from_c:
+                from_g = next(g)
+            except StopIteration as si:
+                return si.value
+            # other exceptions propagate
+
+            while True:
                 try:
-                    from_g = g.throw(e_from_c)
-                except StopIteration as si:
-                    return si.value
-            else:
-                try:
-                    from_g = g.send(v_from_c)
-                except StopIteration as si:
-                    return si.value
+                    v_from_c = callback(from_g)
+                except BaseException as e_from_c:
+                    try:
+                        from_g = g.throw(e_from_c)
+                    except StopIteration as si:
+                        return si.value
+                else:
+                    try:
+                        from_g = g.send(v_from_c)
+                    except StopIteration as si:
+                        return si.value
+        finally:
+            g.close()

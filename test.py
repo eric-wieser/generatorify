@@ -1,5 +1,6 @@
 from unittest import mock
 from collections import namedtuple
+import weakref
 
 import pytest
 
@@ -71,12 +72,9 @@ class ComparisonTest:
         assert c_m.method_calls == []
         return c
 
-    @pytest.fixture(params=['roundtrip', 'normal'])
-    def c(self, c_direct, c_roundtrip, request):
-        if request.param == 'roundtrip':
-            return c_roundtrip
-        else:
-            return c_direct
+    @pytest.fixture(params=['direct', 'roundtrip'])
+    def c(self, request):
+        return request.getfixturevalue("c_{}".format(request.param))
 
 
 class TestNext(ComparisonTest):
@@ -261,6 +259,23 @@ class TestCatch(ComparisonTest):
         assert g_m.method_calls == c_m.method_calls
         assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
+
+
+# no fixture here, they make checking reference too hard
+def test_no_circular_references():
+    def invoke_with_values(f):
+        f(1)
+        f(2)
+        f(3)
+    values_iter = generatorify.generator_from_callback(
+        lambda yield_: invoke_with_values(yield_)
+    )
+    next(values_iter)
+
+    wr = weakref.ref(values_iter)
+    del values_iter
+
+    assert wr() is None
 
 
 if __name__ == '__main__':
