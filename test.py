@@ -203,9 +203,19 @@ class TestCatch(ComparisonTest):
         yield 2
         m.three()
 
+        # caught and changed
+        try:
+            yield 3
+        except BaseException as e:
+            m.four(Error(e))  # Error(e) makes equality work in the test
+            raise OSError()
+        else:
+            m.four()
+
     @staticmethod
     def callback(m, yield_):
         m.one()
+        # caught and continued
         try:
             yield_(1)
         except BaseException as e:
@@ -217,6 +227,15 @@ class TestCatch(ComparisonTest):
         yield_(2)
         m.three()
 
+        # caught and changed
+        try:
+            yield_(3)
+        except BaseException as e:
+            m.four(Error(e))  # Error(e) makes equality work in the test
+            raise OSError()
+        else:
+            m.four()
+
     def test_throw_before_first(self, c, g, c_m, g_m):
         assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(ValueError())
         assert g_m.method_calls == c_m.method_calls == []
@@ -227,6 +246,8 @@ class TestCatch(ComparisonTest):
         assert result_of(next, g) == result_of(next, c) == Value(1)
         assert g_m.method_calls == c_m.method_calls
         assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Value(2)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Value(3)
         assert g_m.method_calls == c_m.method_calls
         assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
@@ -241,12 +262,28 @@ class TestCatch(ComparisonTest):
         assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
 
+    def test_throw_exception_changes(self, c, g, c_m, g_m):
+        assert result_of(next, g) == result_of(next, c) == Value(1)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Value(2)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Value(3)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(g.throw, ValueError) == result_of(c.throw, ValueError) == Error(OSError())
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
+        assert g_m.method_calls == c_m.method_calls
+
     def test_close_within_try_except(self,  c, g, c_m, g_m):
         assert result_of(next, g) == result_of(next, c) == Value(1)
         assert g_m.method_calls == c_m.method_calls
         # different messages, wildcard goes in the middle
         assert result_of(g.close) == Error(RuntimeError(mock.ANY)) == result_of(c.close)
         assert g_m.method_calls == c_m.method_calls
+
+        assert result_of(next, g) == result_of(next, c) == Value(3)
+        assert g_m.method_calls == c_m.method_calls
+
         assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
 
@@ -260,6 +297,19 @@ class TestCatch(ComparisonTest):
         assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
         assert g_m.method_calls == c_m.method_calls
 
+    def test_throw_exception_changes(self, c, g, c_m, g_m):
+        assert result_of(next, g) == result_of(next, c) == Value(1)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Value(2)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Value(3)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(g.close) == result_of(c.close) == Error(OSError())
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(g.close) == result_of(c.close) == Value(None)
+        assert g_m.method_calls == c_m.method_calls
+        assert result_of(next, g) == result_of(next, c) == Error(StopIteration())
+        assert g_m.method_calls == c_m.method_calls
 
 # no fixture here, they make checking reference too hard
 def test_no_circular_references():
